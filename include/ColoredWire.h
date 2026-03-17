@@ -19,24 +19,24 @@ class ColoredWire {
 
         // irreversibly cut the wire
         void cut() {
-            isCut = true;
-            charRepresentation = 'X';
+            this->isCut = true;
+            this->charRepresentation = 'X';
         }
 
         bool getIsCut() const {
-            return isCut;
+            return this->isCut;
         }
 
         GameColor getColor() const {
-            return color;
+            return this->color;
         }
 
         String toString() const {
-            return "Color: " + String(color) + ", Is Cut: " + String(isCut) + ", Char Rep: " + String(charRepresentation);
+            return "Color: " + String(this->color) + ", Is Cut: " + String(this->isCut) + ", Char Rep: " + String(this->charRepresentation);
         }
 
         char getCharRepresentation() const {
-            return charRepresentation;
+            return this->charRepresentation;
         }
 };
 

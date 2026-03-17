@@ -39,10 +39,13 @@ static bool shouldNotCutColor[] = {
     false    // if true don't cut blue
 };
 
+static bool KAABOOOOOOOM = false; // you really dont want this to be true
+
 // func declarations
 void generateRules(int rulesToGenerate);
 String generateRuleAsString(int index, int ruleType);
 void generateWires();
+void printWires();
 bool shouldCutWire(const ColoredWire& wire, Direction dir);
 
 void setup() {
@@ -59,19 +62,43 @@ void setup() {
   for (int i = 0; i < RULES; i++) {
     Serial.printf("%d. %s\n", i + 1, rulesAsString[i].c_str());
   }
+
+  printWires();
 }
 
 void loop() {
-  // TESTING CODE DELETE LATER
-  for (int i = 0; i < 3; i++) {
-    ColoredWire wire = wires[i];
-    String stringRep = wire.toString();
-    Serial.printf("Checking wire %d: %c. Should Cut: %d\n", 
-                  i, 
-                  wire.getCharRepresentation(),
-                  shouldCutWire(wire, static_cast<Direction>(i)));
+  M5.update();
+
+  if (!KAABOOOOOOOM) {
+    bool btnAWasPressed = M5.BtnA.wasPressed();
+    bool btnBWasPressed = M5.BtnB.wasPressed();
+    bool btnCWasPressed = M5.BtnC.wasPressed();
+
+    if (btnAWasPressed || btnBWasPressed || btnCWasPressed) {
+      Direction wireDirection;
+      if (btnAWasPressed) {
+        wireDirection = Direction::LEFT;
+      } else if (btnBWasPressed) {
+        wireDirection = Direction::MIDDLE;
+      } else if (btnCWasPressed) {
+        wireDirection = Direction::RIGHT;
+      }
+
+      ColoredWire& wire = wires[wireDirection];
+      if (!wire.getIsCut()) {
+        if (shouldCutWire(wire, wireDirection)) {
+          Serial.println("good.");
+          wire.cut();
+          printWires();
+        } else {
+          Serial.println("they're all dead. the blood of the innocent cries out to you from the ground");
+          KAABOOOOOOOM = true;
+        }
+      }
+    }
   }
-  delay(1000); // delay to avoid spamming the console
+
+  delay(100);
 }
 
 // randomly generates the rules for the game by filling the rule arrays with true values
@@ -149,6 +176,16 @@ String generateRuleAsString(int index, int ruleType) {
 void generateWires() {
   for (int i = 0; i < 3; i++) {
     wires[i] = ColoredWire(static_cast<GameColor>(random(0, 3)));
+  }
+}
+
+// print the wires
+void printWires() {
+  for (int i = 0; i < 3; i++) {
+    ColoredWire wire = wires[i];
+    Serial.printf("Wire %d: %c.\n", 
+                  i, 
+                  wire.getCharRepresentation());
   }
 }
 
