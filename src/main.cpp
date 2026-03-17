@@ -4,6 +4,12 @@
 #include "GameColor.h"
 #include "Direction.h"
 
+/////// lcd vars ////////
+
+int screenHeight;
+
+/////// game vars ////////
+
 // holds the rules of the game in a string representation for display purposes.
 const int RULES = 4;
 static String rulesAsString[RULES];
@@ -46,11 +52,15 @@ void generateRules(int rulesToGenerate);
 String generateRuleAsString(int index, int ruleType);
 void generateWires();
 void printWires();
+void drawGameScreen();
+void drawKaboomScreen();
 bool shouldCutWire(const ColoredWire& wire, Direction dir);
 
 void setup() {
   M5.begin();
   Serial.begin(115200);
+
+  screenHeight = M5.Lcd.height();
 
   // generate random rules for the game
   generateRules(RULES);
@@ -64,15 +74,16 @@ void setup() {
   }
 
   printWires();
+  drawGameScreen();
 }
 
 void loop() {
   M5.update();
 
   if (!KAABOOOOOOOM) {
-    bool btnAWasPressed = M5.BtnA.wasPressed();
-    bool btnBWasPressed = M5.BtnB.wasPressed();
-    bool btnCWasPressed = M5.BtnC.wasPressed();
+    bool btnAWasPressed = M5.BtnA.wasPressed(); // left wire cut 
+    bool btnBWasPressed = M5.BtnB.wasPressed(); // middle wire cut
+    bool btnCWasPressed = M5.BtnC.wasPressed(); // right wire cut
 
     if (btnAWasPressed || btnBWasPressed || btnCWasPressed) {
       Direction wireDirection;
@@ -84,14 +95,17 @@ void loop() {
         wireDirection = Direction::RIGHT;
       }
 
+      // cut wire if not already cut
       ColoredWire& wire = wires[wireDirection];
       if (!wire.getIsCut()) {
         if (shouldCutWire(wire, wireDirection)) {
           Serial.println("good.");
           wire.cut();
           printWires();
-        } else {
+          drawGameScreen();
+        } else { // game over if you cut the wrong wire
           Serial.println("they're all dead. the blood of the innocent cries out to you from the ground");
+          drawKaboomScreen();
           KAABOOOOOOOM = true;
         }
       }
@@ -159,13 +173,13 @@ String generateRuleAsString(int index, int ruleType) {
       ruleString = "Cut all " + COLOR_TO_STRING[index] + " wires";
       break;
     case 1: // should not cut color
-      ruleString = "Don't cut any " + COLOR_TO_STRING[index] + " wires";
+      ruleString = "Don't cut " + COLOR_TO_STRING[index] + " wires";
       break;
     case 2: // should cut direction
       ruleString = "Cut all " + DIRECTION_TO_STRING[index] + " wires";
       break;
     case 3: // should not cut direction
-      ruleString = "Don't cut any " + DIRECTION_TO_STRING[index] + " wires";
+      ruleString = "Don't cut " + DIRECTION_TO_STRING[index] + " wires";
       break;
   }
 
@@ -177,6 +191,57 @@ void generateWires() {
   for (int i = 0; i < 3; i++) {
     wires[i] = ColoredWire(static_cast<GameColor>(random(0, 3)));
   }
+}
+
+// draws the game screen on the LCD, showing the rules and the wires with their colors and cut status
+void drawGameScreen() {
+  int ruleXOffset = 10;
+  int ruleYOffset = 30;
+  int ruleInBetweenSpacing = 30;
+
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setCursor(ruleXOffset, ruleYOffset);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.setTextColor(WHITE);
+
+  // print the rules
+  for (int i = 0; i < RULES; i++) {
+    M5.Lcd.print(rulesAsString[i]);
+    M5.Lcd.setCursor(ruleXOffset, ruleYOffset + (i + 1) * ruleInBetweenSpacing); // move cursor down for next rule
+  }
+
+  static const int WIRE_X_OFFSET = 50;
+  static const int WIRE_Y_OFFSET = 30;
+  static const int WIRE_SPACING = 100;
+
+  // converts GameColor enum values to their corresponding TFT color values for setting the text color when printing the wires on the LCD.
+  static const uint16_t GAME_COLOR_TO_TFT_COLOR[] = {
+    RED, 
+    GREEN, 
+    BLUE
+  };
+
+  M5.Lcd.setCursor(WIRE_X_OFFSET, screenHeight - WIRE_Y_OFFSET); 
+
+  // print the wire char representations at the bottom of the screen above the buttons, in its corresponding color
+  for (int i = 0; i < 3; i++) {
+    ColoredWire &wire = wires[i];
+    M5.Lcd.setTextColor(GAME_COLOR_TO_TFT_COLOR[wire.getColor()]);
+    M5.Lcd.print(wire.getCharRepresentation());
+    M5.Lcd.setCursor(WIRE_X_OFFSET + (i + 1) * WIRE_SPACING, screenHeight - WIRE_Y_OFFSET); // move cursor to the right for the next wire
+  }
+}
+
+// draws a glorious kaboom screen that fills the entire LCD with red and "KABOOM" in big black letters 
+void drawKaboomScreen() {
+  int xOffset = 0;
+  int yOffset = 0;
+
+  M5.Lcd.fillScreen(RED);
+  M5.Lcd.setCursor(xOffset, yOffset);
+  M5.Lcd.setTextSize(5);
+  M5.Lcd.setTextColor(BLACK);
+  M5.Lcd.print("KABOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOM"); 
 }
 
 // print the wires
