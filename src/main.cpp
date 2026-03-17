@@ -4,6 +4,9 @@
 #include "GameColor.h"
 #include "Direction.h"
 
+// TODO end game when user taps the screen after cutting wires,
+// add time limit
+
 /////// lcd vars ////////
 
 int screenHeight;
@@ -53,6 +56,7 @@ String generateRuleAsString(int index, int ruleType);
 void generateWires();
 void printWires();
 void drawGameScreen();
+void commenceKaboom();
 void drawKaboomScreen();
 bool shouldCutWire(const ColoredWire& wire, Direction dir);
 
@@ -80,7 +84,8 @@ void setup() {
 void loop() {
   M5.update();
 
-  if (!KAABOOOOOOOM) {
+  if (!KAABOOOOOOOM) { // if the game isn't over...
+    
     bool btnAWasPressed = M5.BtnA.wasPressed(); // left wire cut 
     bool btnBWasPressed = M5.BtnB.wasPressed(); // middle wire cut
     bool btnCWasPressed = M5.BtnC.wasPressed(); // right wire cut
@@ -105,8 +110,7 @@ void loop() {
           drawGameScreen();
         } else { // game over if you cut the wrong wire
           Serial.println("they're all dead. the blood of the innocent cries out to you from the ground");
-          drawKaboomScreen();
-          KAABOOOOOOOM = true;
+          commenceKaboom();
         }
       }
     }
@@ -195,14 +199,24 @@ void generateWires() {
 
 // draws the game screen on the LCD, showing the rules and the wires with their colors and cut status
 void drawGameScreen() {
-  int ruleXOffset = 10;
-  int ruleYOffset = 30;
-  int ruleInBetweenSpacing = 30;
-
   M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setCursor(ruleXOffset, ruleYOffset);
   M5.Lcd.setTextSize(2);
   M5.Lcd.setTextColor(WHITE);
+
+  int tapWhenDoneXOffset = 10;
+  int tapWhenDoneYOffset = 20;
+
+  // print message at top informing user to tap the screen when done cutting wires
+  M5.Lcd.setCursor(tapWhenDoneXOffset, tapWhenDoneYOffset);
+  M5.Lcd.print("Tap screen to end game");
+
+  int ruleXOffset = 10;
+  int ruleYOffset = 60;
+  int ruleInBetweenSpacing = 30;
+
+  M5.Lcd.setCursor(ruleXOffset, ruleYOffset);
+  M5.Lcd.setTextColor(YELLOW);
+  M5.Lcd.setTextSize(2);
 
   // print the rules
   for (int i = 0; i < RULES; i++) {
@@ -230,6 +244,12 @@ void drawGameScreen() {
     M5.Lcd.print(wire.getCharRepresentation());
     M5.Lcd.setCursor(WIRE_X_OFFSET + (i + 1) * WIRE_SPACING, screenHeight - WIRE_Y_OFFSET); // move cursor to the right for the next wire
   }
+}
+
+// draws game over screen and sets KAABOOOOOOOM to true to prevent further input processing
+void commenceKaboom() {
+  drawKaboomScreen();
+  KAABOOOOOOOM = true;
 }
 
 // draws a glorious kaboom screen that fills the entire LCD with red and "KABOOM" in big black letters 
@@ -261,5 +281,5 @@ bool shouldCutWire(const ColoredWire& wire, Direction dir) {
   bool shouldCuts = shouldCutColor[color] || shouldCutDirection[dir];
   bool shouldntCuts = shouldNotCutColor[color] || shouldNotCutDirection[dir];
 
-  return (shouldCuts && !shouldntCuts);
+  return (shouldCuts && !shouldntCuts); // true if the wire s
 }
