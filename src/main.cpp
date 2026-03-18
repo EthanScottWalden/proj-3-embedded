@@ -9,9 +9,14 @@
 
 /////// lcd vars ////////
 
+int screenWidth;
 int screenHeight;
 
 /////// game vars ////////
+
+int timeLimitSeconds = 15; // time limit for the game in seconds
+int timeLeft;
+double startTime;
 
 // holds the rules of the game in a string representation for display purposes.
 const int RULES = 4;
@@ -48,7 +53,7 @@ static bool shouldNotCutColor[] = {
     false    // if true don't cut blue
 };
 
-static bool KAABOOOOOOOM = false; // you really dont want this to be true
+static bool gameOver = false; // flag to indicate whether the game is over (either success or failure)
 
 // func declarations
 void generateRules(int rulesToGenerate);
@@ -56,14 +61,18 @@ String generateRuleAsString(int index, int ruleType);
 void generateWires();
 void printWires();
 void drawGameScreen();
+void drawSuccessScreen();
+void winGame();
 void commenceKaboom();
 void drawKaboomScreen();
+void determineGameState();
 bool shouldCutWire(const ColoredWire& wire, Direction dir);
 
 void setup() {
   M5.begin();
   Serial.begin(115200);
 
+  screenWidth = M5.Lcd.width();
   screenHeight = M5.Lcd.height();
 
   // generate random rules for the game
@@ -73,46 +82,61 @@ void setup() {
   generateWires();
 
   // print the rules to the console for testing purposes
-  for (int i = 0; i < RULES; i++) {
-    Serial.printf("%d. %s\n", i + 1, rulesAsString[i].c_str());
-  }
+  // for (int i = 0; i < RULES; i++) {
+  //   Serial.printf("%d. %s\n", i + 1, rulesAsString[i].c_str());
+  // }
 
-  printWires();
+  // printWires();
+
+  timeLeft = timeLimitSeconds;
   drawGameScreen();
+
+  startTime = millis(); // record the start time of the game for timing purposes
 }
 
 void loop() {
   M5.update();
 
-  if (!KAABOOOOOOOM) { // if the game isn't over...
-    
-    bool btnAWasPressed = M5.BtnA.wasPressed(); // left wire cut 
-    bool btnBWasPressed = M5.BtnB.wasPressed(); // middle wire cut
-    bool btnCWasPressed = M5.BtnC.wasPressed(); // right wire cut
+  if (!gameOver) {
+    // first check if screen was tapped to end the game, if so check if the player should win or lose depending on if they cut all the correct wires
+    int timeElapsed = (millis() - startTime) / 1000; // calculate time elapsed in seconds
 
-    if (btnAWasPressed || btnBWasPressed || btnCWasPressed) {
-      Direction wireDirection;
-      if (btnAWasPressed) {
-        wireDirection = Direction::LEFT;
-      } else if (btnBWasPressed) {
-        wireDirection = Direction::MIDDLE;
-      } else if (btnCWasPressed) {
-        wireDirection = Direction::RIGHT;
-      }
+    int newTimeLeft = timeLimitSeconds - timeElapsed; // calculate time left
+    if (newTimeLeft != timeLeft) { // update the screen if the time left has changed. (not doing every iteration to avoid unnecessary screen redraws)
+      timeLeft = newTimeLeft;
+      drawGameScreen();
+    }
 
-      // cut wire if not already cut
-      ColoredWire& wire = wires[wireDirection];
-      if (!wire.getIsCut()) {
-        if (shouldCutWire(wire, wireDirection)) {
-          Serial.println("good.");
-          wire.cut();
-          printWires();
-          drawGameScreen();
-        } else { // game over if you cut the wrong wire
-          Serial.println("they're all dead. the blood of the innocent cries out to you from the ground");
-          commenceKaboom();
+    if (timeLeft > 0) {
+      bool btnAWasPressed = M5.BtnA.wasPressed(); // left wire cut 
+      bool btnBWasPressed = M5.BtnB.wasPressed(); // middle wire cut
+      bool btnCWasPressed = M5.BtnC.wasPressed(); // right wire cut
+
+      if (btnAWasPressed || btnBWasPressed || btnCWasPressed) {
+        Direction wireDirection;
+        if (btnAWasPressed) {
+          wireDirection = Direction::LEFT;
+        } else if (btnBWasPressed) {
+          wireDirection = Direction::MIDDLE;
+        } else if (btnCWasPressed) {
+          wireDirection = Direction::RIGHT;
         }
+
+        // cut wire if not already cut
+        ColoredWire& wire = wires[wireDirection];
+        if (!wire.getIsCut()) {
+          if (shouldCutWire(wire, wireDirection)) {
+            wire.cut();
+            drawGameScreen();
+          } else { // game over if you cut the wrong wire
+            commenceKaboom();
+          }
+        }
+      } else if (M5.Touch.ispressed()) { // if the user taps the screen and didn't tap a button, check if they win or lose based on whether they cut the correct wires
+        determineGameState();
       }
+    } else {
+      commenceKaboom(); // game over if time runs out
     }
   }
 
@@ -204,14 +228,23 @@ void drawGameScreen() {
   M5.Lcd.setTextColor(WHITE);
 
   int tapWhenDoneXOffset = 10;
-  int tapWhenDoneYOffset = 20;
+  int tapWhenDoneYOffset = 40;
 
   // print message at top informing user to tap the screen when done cutting wires
   M5.Lcd.setCursor(tapWhenDoneXOffset, tapWhenDoneYOffset);
   M5.Lcd.print("Tap screen to end game");
 
+
+  M5.Lcd.setTextColor(timeLeft > 5 ? GREEN : RED); // red if 5 or less seconds left, green otherwise
+  int timeLeftXOffset = screenWidth - 30;
+  int timeLeftYOffset = 20;
+
+  // print the time left in the top right corner of the screen
+  M5.Lcd.setCursor(timeLeftXOffset, timeLeftYOffset);
+  M5.Lcd.printf("%d", timeLeft);
+
   int ruleXOffset = 10;
-  int ruleYOffset = 60;
+  int ruleYOffset = 80;
   int ruleInBetweenSpacing = 30;
 
   M5.Lcd.setCursor(ruleXOffset, ruleYOffset);
@@ -246,10 +279,24 @@ void drawGameScreen() {
   }
 }
 
-// draws game over screen and sets KAABOOOOOOOM to true to prevent further input processing
+// draws game over screen and sets gameOver to true to prevent further input processing
 void commenceKaboom() {
   drawKaboomScreen();
-  KAABOOOOOOOM = true;
+  gameOver = true;
+}
+
+// draws success screen and sets gameOver to true to prevent further input processing
+void winGame() {
+  drawSuccessScreen();
+  gameOver = true;
+}
+
+// draws the success screen, with a green background and "DEFUSED!!" in big black letters in the middle of the screen
+void drawSuccessScreen() {
+  M5.Lcd.fillScreen(GREEN);
+  M5.Lcd.setTextSize(5);
+  M5.Lcd.setTextColor(BLACK);
+  M5.Lcd.drawString("DEFUSED", 60, 100);
 }
 
 // draws a glorious kaboom screen that fills the entire LCD with red and "KABOOM" in big black letters 
@@ -272,6 +319,20 @@ void printWires() {
                   i, 
                   wire.getCharRepresentation());
   }
+}
+
+// kabooms if player failed to cut a wire they should have cut, wins the game if they cut all the wires they should have cut
+void determineGameState() {
+  for (int i = 0; i < 3; i++) { 
+    ColoredWire &wire = wires[i];
+    Direction dir = static_cast<Direction>(i);
+    if (shouldCutWire(wire, dir) && !wire.getIsCut()) {
+      commenceKaboom(); // if the player failed to cut a wire they should have cut, kaboom
+      return;
+    }
+  }
+
+  winGame(); // if we get to the end of the loop and haven't kaboomed, the player wins!
 }
 
 // this function determines whether a wire should be cut based on its color and direction, using the rules defined in the arrays.
