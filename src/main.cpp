@@ -11,7 +11,7 @@
 #define RULES_UUID "8af8cd3e-18b1-474d-9393-2b30dca181d1"
 #define GAME_STATE_UUID "5ebdfc4f-92b2-4c43-8067-347eff415317"
 
-bool isServer = false; // whether this device is the server or client in a multiplayer game
+bool isServer = true; // whether this device is the server or client in a multiplayer game
 static bool gameOver = false; // flag to indicate whether the game is running
 
 // client/server vars
