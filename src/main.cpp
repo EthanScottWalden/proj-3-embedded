@@ -3,9 +3,180 @@
 #include "ColoredWire.h"
 #include "GameColor.h"
 #include "Direction.h"
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
 
-// TODO end game when user taps the screen after cutting wires,
-// add time limit
+#define SERVICE_UUID "53b3448b-4e1e-4d97-bd07-9d11deca4188"
+#define RULES_UUID "8af8cd3e-18b1-474d-9393-2b30dca181d1"
+#define GAME_START_UUID "5ebdfc4f-92b2-4c43-8067-347eff415317"
+#define GAME_END_UUID "2ff3d535-dc05-4187-b83d-07a22df7cacf"
+
+bool isServer = false; // whether this device is the server or client in a multiplayer game
+
+// client/server vars
+bool deviceConnected = false;
+static String BROADCAST_NAME = "i occasionally enjoy defusing bombs";
+bool doConnect;
+bool doScan;
+
+// server vars
+BLEServer *bleServer;
+BLEService *bleService;
+BLECharacteristic *rulesCharacteristic;
+BLECharacteristic *gameStartCharacteristic;
+BLECharacteristic *gameEndCharacteristic;
+
+// BLE Server Callback Methods
+class MyServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer *pServer) override {
+        deviceConnected = true;
+        Serial.println("Device connected...");
+    }
+
+    void onDisconnect(BLEServer *pServer) override {
+        deviceConnected = false;
+        Serial.println("Device disconnected...");
+    }
+};
+
+class MyRulesCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    // TODO
+  }
+};
+
+
+class MyGameStartCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    // TODO
+  }
+};
+
+class MyGameEndCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    // TODO
+  }
+};
+
+// client vars
+static BLEUUID serviceUUID(SERVICE_UUID);
+static BLEUUID rulesUUID(RULES_UUID);
+static BLEUUID gameStartUUID(GAME_START_UUID);
+static BLEUUID gameEndUUID(GAME_END_UUID);
+
+static BLERemoteCharacteristic* rulesRemoteCharacteristic;
+static BLERemoteCharacteristic* gameStartRemoteCharacteristic;
+static BLERemoteCharacteristic* gameEndRemoteCharacteristic;
+static BLEAdvertisedDevice* bleRemoteServer;
+
+// BLE Client Callback Methods
+class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
+{
+    /**
+     * Called for each advertising BLE server.
+     */
+    void onResult(BLEAdvertisedDevice advertisedDevice)
+    {
+        // Print device found
+        Serial.printf("BLE Advertised Device found with name: %s\n", advertisedDevice.getName().c_str());
+
+        // More debugging print
+        Serial.printf("\tAddress: %s\n", advertisedDevice.getAddress().toString().c_str());
+        Serial.printf("\tHas a ServiceUUID: %s\n", advertisedDevice.haveServiceUUID() ? "True" : "False");
+        for (int i = 0; i < advertisedDevice.getServiceUUIDCount(); i++) {
+           Serial.printf("\t\t%s\n", advertisedDevice.getServiceUUID(i).toString().c_str());
+        }
+        Serial.printf("\tHas our service: %s\n\n", advertisedDevice.isAdvertisingService(serviceUUID) ? "True" : "False");
+        
+        // We have found a device, let us now see if it contains the service we are looking for.
+        if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID) && advertisedDevice.getName() == BROADCAST_NAME.c_str()) {
+            BLEDevice::getScan()->stop();
+            bleRemoteServer = new BLEAdvertisedDevice(advertisedDevice);
+            doConnect = true;
+            doScan = true;
+        } 
+    }     
+};        
+
+class MyClientCallback : public BLEClientCallbacks
+{
+    void onConnect(BLEClient *pclient)
+    {
+        deviceConnected = true;
+        Serial.println("Client connected.");
+    }
+
+    void onDisconnect(BLEClient *pclient)
+    {
+        deviceConnected = false;
+        Serial.println("Client disconnected.");
+    }
+};
+
+static void rulesNotifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic,uint8_t *pData, size_t length, bool isNotify)
+{
+  // TODO
+}
+
+static void gameEndCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic,uint8_t *pData, size_t length, bool isNotify)
+{
+  // TODO
+}
+
+bool connectToServer()
+{
+    // Create the client
+    Serial.printf("Forming a connection to %s\n", bleRemoteServer->getAddress().toString().c_str());
+    BLEClient *bleClient = BLEDevice::createClient();
+    bleClient->setClientCallbacks(new MyClientCallback());
+
+    // Connect to the remove BLE Server. 
+    if (!bleClient->connect(bleRemoteServer)) {
+        Serial.printf("the heinz big bean has escaped. may god have mercy on our souls (failed to connect to server %s)\n", 
+            bleRemoteServer->getName().c_str());
+    }
+    Serial.printf("Connected to server %s\n", bleRemoteServer->getName().c_str());
+
+    // Obtain a reference to the service we are after in the remote BLE server.
+    BLERemoteService *bleRemoteService = bleClient->getService(serviceUUID);
+    if (bleRemoteService == nullptr) {
+        Serial.printf("the heinz big bean has ascended to the heavens. they have left us (failed to find our service UUID: %s)\n", serviceUUID.toString().c_str()); 
+        bleClient->disconnect();
+        return false;
+    }
+    Serial.printf("\tFound our service UUID: %s\n", serviceUUID.toString().c_str());
+
+    // Obtain references to the characteristics in the service of the remote BLE server.
+    rulesRemoteCharacteristic = bleRemoteService->getCharacteristic(rulesUUID);
+    if (rulesRemoteCharacteristic == nullptr) {
+        Serial.printf("the heinz big bean has transformed into an unrecognizable abomination (failed to find our characteristic UUID: %s)\n", rulesUUID.toString().c_str());
+        bleClient->disconnect();
+        return false;
+    }
+    // bleRemoteCharacteristicServerPos = bleRemoteService->getCharacteristic(CHARACTERISTIC_UUID_SERVER_POS);
+    // if (bleRemoteCharacteristicServerPos == nullptr) {
+    //     Serial.printf("the heinz big bean has transformed into an unrecognizable abomination (failed to find our characteristic UUID: %s)\n", CHARACTERISTIC_UUID_SERVER_POS.toString().c_str());
+    //     bleClient->disconnect();
+    //     return false;
+    // }
+    // Serial.printf("\tFound our characteristic UUID: %s\n", CHARACTERISTIC_UUID_CLIENT_POS.toString().c_str());
+    // Serial.printf("\tFound our characteristic UUID: %s\n", CHARACTERISTIC_UUID_SERVER_POS.toString().c_str());
+
+     // Read the value of the characteristic.
+    // if (bleRemoteCharacteristicServerPos->canRead()) {
+    //     std::string value = bleRemoteCharacteristicServerPos->readValue();
+    //     Serial.printf("The characteristic value was: %s\n", value.c_str());
+    //     updateGameScreen();
+    // }
+
+    // Check if server's characteristic can notify client of changes and register to listen if so
+    // if (bleRemoteCharacteristicServerPos->canNotify())
+    //     bleRemoteCharacteristicServerPos->registerForNotify(notifyCallback);
+
+    deviceConnected = true;
+    return deviceConnected;
+}
 
 /////// lcd vars ////////
 
@@ -19,8 +190,8 @@ int timeLeft;
 double startTime;
 
 // holds the rules of the game in a string representation for display purposes.
-const int RULES = 4;
-static String rulesAsString[RULES];
+const int LOCAL_RULES = 4;
+static String rulesAsString[LOCAL_RULES];
 
 // array to hold the wires in the game... we treat wire[0] as the left wire, wire[1] as the middle wire, and wire[2] as the right wire,
 // to line up with the Direction enum values.
@@ -75,8 +246,20 @@ void setup() {
   screenWidth = M5.Lcd.width();
   screenHeight = M5.Lcd.height();
 
+  // if (isServer) {
+  //   BLEDevice::init(BROADCAST_NAME.c_str());
+  //   broadcastBleServer();
+  // } else {
+  //   BLEDevice::init("");
+  //   BLEScan *pBLEScan = BLEDevice::getScan();
+  // }
+
+  while (deviceConnected) {
+    delay(50);
+  };
+
   // generate random rules for the game
-  generateRules(RULES);
+  generateRules(LOCAL_RULES);
 
   // generate randomly colored wires for the game
   generateWires();
@@ -140,7 +323,64 @@ void loop() {
     }
   }
 
-  delay(100);
+  delay(200);
+}
+
+// connects to server player
+bool connectToServer() {
+  // Create the client
+  Serial.printf("Forming a connection to %s\n", bleRemoteServer->getAddress().toString().c_str());
+  BLEClient *bleClient = BLEDevice::createClient();
+  bleClient->setClientCallbacks(new MyClientCallback());
+
+  // Create the client
+  Serial.printf("Forming a connection to %s\n", bleRemoteServer->getAddress().toString().c_str());
+  BLEClient *bleClient = BLEDevice::createClient();
+  bleClient->setClientCallbacks(new MyClientCallback());
+}
+
+// creates and broadcasts BLE server
+void broadcastBleServer() {
+  bleServer = BLEDevice::createServer();
+  bleServer->setCallbacks(new MyServerCallbacks());
+
+  // creating characteristics
+  rulesCharacteristic = bleService->createCharacteristic(RULES_UUID,
+                                                         BLECharacteristic::PROPERTY_READ |
+                                                         BLECharacteristic::PROPERTY_WRITE |
+                                                         BLECharacteristic::PROPERTY_NOTIFY |
+                                                         BLECharacteristic::PROPERTY_INDICATE
+  );
+  rulesCharacteristic->setCallbacks(new MyRulesCallbacks());
+
+  gameStartCharacteristic = bleService->createCharacteristic(GAME_START_UUID,
+                                                             BLECharacteristic::PROPERTY_READ |
+                                                             BLECharacteristic::PROPERTY_WRITE |
+                                                             BLECharacteristic::PROPERTY_NOTIFY |
+                                                             BLECharacteristic::PROPERTY_INDICATE
+  );
+  gameStartCharacteristic->setCallbacks(new MyGameStartCallbacks());
+
+  gameEndCharacteristic = bleService->createCharacteristic(GAME_END_UUID,
+                                                           BLECharacteristic::PROPERTY_READ |
+                                                           BLECharacteristic::PROPERTY_WRITE |
+                                                           BLECharacteristic::PROPERTY_NOTIFY |
+                                                           BLECharacteristic::PROPERTY_INDICATE
+  );
+  gameEndCharacteristic->setCallbacks(new MyGameEndCallbacks());
+
+  // starting service after creating characteristics
+  bleService->start();
+
+   // Start broadcasting (advertising) BLE service
+  BLEAdvertising *bleAdvertising = BLEDevice::getAdvertising();
+  bleAdvertising->addServiceUUID(SERVICE_UUID);
+  bleAdvertising->setScanResponse(true);
+  bleAdvertising->setMinPreferred(0x12); // Use this value most of the time
+  // bleAdvertising->setMinPreferred(0x06); // Functions that help w/ iPhone connection issues
+  // bleAdvertising->setMinPreferred(0x00); // Set value to 0x00 to not advertise this parameter
+  BLEDevice::startAdvertising();
+  Serial.println("Characteristic defined...you can connect with your BOMB! I mean... your other M5.");
 }
 
 // randomly generates the rules for the game by filling the rule arrays with true values
@@ -252,7 +492,7 @@ void drawGameScreen() {
   M5.Lcd.setTextSize(2);
 
   // print the rules
-  for (int i = 0; i < RULES; i++) {
+  for (int i = 0; i < LOCAL_RULES; i++) {
     M5.Lcd.print(rulesAsString[i]);
     M5.Lcd.setCursor(ruleXOffset, ruleYOffset + (i + 1) * ruleInBetweenSpacing); // move cursor down for next rule
   }
