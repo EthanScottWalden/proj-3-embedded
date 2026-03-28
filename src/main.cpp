@@ -14,9 +14,11 @@
 // TODO 1: server and client should send each other rules before starting game.
 // TODO 2: if a player cuts wrong wire, lose game for both players
 // TODO 3: if a player ends game, check wires across both devices and win or lose both players depending on if each wire was cut.
-// TODO 4: Ask we need something like "you/other player ended the game" on end screen or "other player cut left red wire" on game screen to fulfill other reqs
 
 bool isServer = true; // whether this device is the server or client in a multiplayer game
+bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
+static bool doKaboom = false; // flag for game loss
+static bool doWin = false; // flag for game win
 static bool gameOver = false; // flag to indicate whether the game is running
 
 // client/server vars
@@ -62,18 +64,6 @@ static ColoredWire wires[3];
 // arrays to represent the rules of the game, indexed by their corresponding enum values.
 // "should" arrays represent conditions under which a wire should be cut, and "shouldNot" arrays represent conditions under which a wire should not be cut.
 // the "shouldNot" arrays override the "should" arrays, so if a condition is true in both, the wire should not be cut.
-static bool shouldCutDirection[] = {
-    false,   // if true cut left
-    false,  // if true cut middle
-    false    // if true cut right
-}; 
-
-static bool shouldNotCutDirection[] = {
-    false,   // if true don't cut left
-    false,  // if true don't cut middle
-    false    // if true don't cut right
-};
-
 static bool shouldCutColor[] = {
     false,   // if true cut red
     false,  // if true cut green
@@ -86,9 +76,38 @@ static bool shouldNotCutColor[] = {
     false    // if true don't cut blue
 };
 
+static bool shouldCutDirection[] = {
+    false,   // if true cut left
+    false,  // if true cut middle
+    false    // if true cut right
+}; 
+
+static bool shouldNotCutDirection[] = {
+    false,   // if true don't cut left
+    false,  // if true don't cut middle
+    false    // if true don't cut right
+};
+
+// struct for array and size because you can't get the size of an array from a pointer (which the arrays in ruleArrays are).
+struct RuleArray {
+  bool* array;
+  int size;
+};
+
+// used to make it easier to generate and share rules.
+static RuleArray ruleArrays[] = {
+  {shouldCutColor, sizeof(shouldCutColor) / sizeof(shouldCutColor[0])},
+  {shouldNotCutColor, sizeof(shouldNotCutColor) / sizeof(shouldNotCutColor[0])},
+  {shouldCutDirection, sizeof(shouldCutDirection) / sizeof(shouldCutDirection[0])},
+  {shouldNotCutDirection, sizeof(shouldNotCutDirection) / sizeof(shouldNotCutDirection[0])}
+};
+
+int numRuleArrays = sizeof(ruleArrays) / sizeof(ruleArrays[0]);
+
 // func declarations
 void generateRules(int rulesToGenerate);
 String generateRuleAsString(int index, int ruleType);
+std::string generateRulesAsBits();
 void generateWires();
 void printWires();
 void drawGameScreen();
@@ -96,7 +115,7 @@ void drawSuccessScreen();
 void winGame();
 void commenceKaboom();
 void drawKaboomScreen();
-void determineGameState();
+bool determineGameState();
 bool shouldCutWire(const ColoredWire& wire, Direction dir);
 void broadcastBleServer();
 bool connectToServer();
@@ -119,7 +138,7 @@ class MyServerCallbacks : public BLEServerCallbacks {
 class MyRulesCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
     std::string rules = pCharacteristic->getValue();
-    // updateRemoteRules(rules);
+    updateRemoteRules(rules);
   }
 };
 
@@ -177,7 +196,7 @@ class MyClientCallback : public BLEClientCallbacks
 static void rulesNotifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic,uint8_t *pData, size_t length, bool isNotify)
 {
   std::string rules((char*)pData, length);
-  // updateRemoteRules(rules);
+  updateRemoteRules(rules);
 }
 
 static void gameStateNotifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic,uint8_t *pData, size_t length, bool isNotify)
@@ -193,27 +212,27 @@ void setup() {
   screenWidth = M5.Lcd.width();
   screenHeight = M5.Lcd.height();
 
-  if (isServer) {
-    BLEDevice::init(BROADCAST_NAME.c_str());
-    broadcastBleServer();
-  } else {
-    BLEDevice::init("");
-    BLEScan *pBLEScan = BLEDevice::getScan();
-    pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-    pBLEScan->setInterval(1349);
-    pBLEScan->setWindow(449);
-    pBLEScan->setActiveScan(true);
-    pBLEScan->start(5, false);
+  // if (isServer) {
+  //   BLEDevice::init(BROADCAST_NAME.c_str());
+  //   broadcastBleServer();
+  // } else {
+  //   BLEDevice::init("");
+  //   BLEScan *pBLEScan = BLEDevice::getScan();
+  //   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  //   pBLEScan->setInterval(1349);
+  //   pBLEScan->setWindow(449);
+  //   pBLEScan->setActiveScan(true);
+  //   pBLEScan->start(5, false);
 
-    if (doConnect)
-    {
-        if (connectToServer())
-            Serial.println("We are now connected to the BLE Server.");
-        else
-            Serial.println("We have failed to connect to the server; there is nothin more we will do.");
-        doConnect = false;
-    }
-  }
+  //   if (doConnect)
+  //   {
+  //       if (connectToServer())
+  //           Serial.println("We are now connected to the BLE Server.");
+  //       else
+  //           Serial.println("We have failed to connect to the server; there is nothin more we will do.");
+  //       doConnect = false;
+  //   }
+  // }
 
   // while (!deviceConnected) {
   //   delay(50);
@@ -221,6 +240,16 @@ void setup() {
 
   // generate random rules for the game
   generateRules(LOCAL_RULES);
+
+  std::string rulesAsBits = generateRulesAsBits();
+  Serial.println(rulesAsBits.c_str());
+
+  // std::string testStr = "100 000 000 111";
+  // Serial.printf("Testing rule copy with: %s\n", testStr.c_str());
+  // updateRemoteRules(testStr);
+
+  // rulesAsBits = generateRulesAsBits();
+  // Serial.println(rulesAsBits.c_str());
 
   // generate randomly colored wires for the game
   generateWires();
@@ -242,49 +271,66 @@ void loop() {
   M5.update();
 
   if (!gameOver) {
-    // first check if screen was tapped to end the game, if so check if the player should win or lose depending on if they cut all the correct wires
-    int timeElapsed = (millis() - startTime) / 1000; // calculate time elapsed in seconds
+    if (doKaboom) {
+      commenceKaboom();
+    } else if (doWin) {
+      winGame();
+    } else {
+      // first check if screen was tapped to end the game, if so check if the player should win or lose depending on if they cut all the correct wires
+      int timeElapsed = (millis() - startTime) / 1000; // calculate time elapsed in seconds
 
-    int newTimeLeft = timeLimitSeconds - timeElapsed; // calculate time left
-    if (newTimeLeft != timeLeft) { // update the screen if the time left has changed. (not doing every iteration to avoid unnecessary screen redraws)
-      timeLeft = newTimeLeft;
-      drawGameScreen();
-    }
+      int newTimeLeft = timeLimitSeconds - timeElapsed; // calculate time left
+      if (newTimeLeft != timeLeft) { // update the screen if the time left has changed. (not doing every iteration to avoid unnecessary screen redraws)
+        timeLeft = newTimeLeft;
+        drawGameScreen();
+      }
 
-    if (timeLeft > 0) {
-      bool btnAWasPressed = M5.BtnA.wasPressed(); // left wire cut 
-      bool btnBWasPressed = M5.BtnB.wasPressed(); // middle wire cut
-      bool btnCWasPressed = M5.BtnC.wasPressed(); // right wire cut
+      if (timeLeft > 0) {
+        bool btnAWasPressed = M5.BtnA.wasPressed(); // left wire cut 
+        bool btnBWasPressed = M5.BtnB.wasPressed(); // middle wire cut
+        bool btnCWasPressed = M5.BtnC.wasPressed(); // right wire cut
 
-      if (btnAWasPressed || btnBWasPressed || btnCWasPressed) {
-        Direction wireDirection;
-        if (btnAWasPressed) {
-          wireDirection = Direction::LEFT;
-        } else if (btnBWasPressed) {
-          wireDirection = Direction::MIDDLE;
-        } else if (btnCWasPressed) {
-          wireDirection = Direction::RIGHT;
-        }
+        if (btnAWasPressed || btnBWasPressed || btnCWasPressed) {
+          Direction wireDirection;
+          if (btnAWasPressed) {
+            wireDirection = Direction::LEFT;
+          } else if (btnBWasPressed) {
+            wireDirection = Direction::MIDDLE;
+          } else if (btnCWasPressed) {
+            wireDirection = Direction::RIGHT;
+          }
 
-        // cut wire if not already cut
-        ColoredWire& wire = wires[wireDirection];
-        if (!wire.getIsCut()) {
-          if (shouldCutWire(wire, wireDirection)) {
-            wire.cut();
-            drawGameScreen();
-          } else { // game over if you cut the wrong wire
-            commenceKaboom();
+          // cut wire if not already cut
+          ColoredWire& wire = wires[wireDirection];
+          if (!wire.getIsCut()) {
+            if (shouldCutWire(wire, wireDirection)) {
+              wire.cut();
+              drawGameScreen();
+            } else { // game over if you cut the wrong wire
+              doKaboom = true;
+            }
+          }
+          // if the user taps the screen and didn't tap a button, check if they win or lose based on whether they cut the correct wires
+          // we only check if the press point wasn't near the very bottom of the screen, as in that case we assume it was accidental from pressing the buttons.
+        } else if (M5.Touch.ispressed()) { 
+          Point touchCoord = M5.Touch.getPressPoint();
+          if (touchCoord.y < screenHeight - 50) {
+            bool gameState = determineGameState();
+
+            if (gameState) {
+              doWin = true;
+            } else {
+              doKaboom = true;
+            }
           }
         }
-      } else if (M5.Touch.ispressed()) { // if the user taps the screen and didn't tap a button, check if they win or lose based on whether they cut the correct wires
-        determineGameState();
+      } else {
+        doKaboom = true; // game over if time runs out
       }
-    } else {
-      commenceKaboom(); // game over if time runs out
     }
   }
 
-  delay(200);
+  delay(50);
 }
 
 // creates and broadcasts BLE server
@@ -385,21 +431,6 @@ bool connectToServer()
 
 // randomly generates the rules for the game by filling the rule arrays with true values
 void generateRules(int rulesToGenerate) {
-  // struct for array and size because you can't get the size of an array from a pointer (which the arrays in ruleArrays are).
-  struct RuleArray {
-    bool* array;
-    int size;
-  };
-  
-  static RuleArray ruleArrays[] = {
-    {shouldCutColor, sizeof(shouldCutColor) / sizeof(shouldCutColor[0])},
-    {shouldNotCutColor, sizeof(shouldNotCutColor) / sizeof(shouldNotCutColor[0])},
-    {shouldCutDirection, sizeof(shouldCutDirection) / sizeof(shouldCutDirection[0])},
-    {shouldNotCutDirection, sizeof(shouldNotCutDirection) / sizeof(shouldNotCutDirection[0])}
-  };
-
-  int numRuleArrays = sizeof(ruleArrays) / sizeof(ruleArrays[0]);
-
   int8_t rulesSoFar = 0;
 
   while (rulesSoFar < rulesToGenerate) {
@@ -417,6 +448,29 @@ void generateRules(int rulesToGenerate) {
       rulesSoFar++;
     }
   }
+}
+
+// iterates over ruleArrays and generates a string representing the truth values in each array.
+// each array is represented by a substring of binary numbers within the larger returned string, 
+// where, for some j, the jth character in the set = 1 means array[j] is true, and = 0 means false.
+// the substrings of binary are seperated by spaces, such that, for some i, the ith substirng of binary represents truth values in the ith array 
+std::string generateRulesAsBits() {
+  std::string res = "";
+
+  for (int i = 0; i < numRuleArrays; i++) {
+    RuleArray currentArray = ruleArrays[i];
+    
+    for (int j = 0; j < currentArray.size; j++) {
+      res += currentArray.array[j] ? '1' : '0';
+    }
+
+    // append space on every iteration except the last
+    if (i < numRuleArrays - 1) {
+      res += " ";
+    }
+  }
+
+  return res;
 }
 
 // generates a string representation of a rule 
@@ -459,6 +513,30 @@ void generateWires() {
   for (int i = 0; i < 3; i++) {
     wires[i] = ColoredWire(static_cast<GameColor>(random(0, 3)));
   }
+}
+
+// copies over the rules from the other device by parsing the generated rules bit string.
+// for the ith binary substring and the jth character within that substring, ruleArrays[i].array[j] becomes true if that jth character is '1'.  
+void updateRemoteRules(std::string rules) {
+  int ruleArrayIndex = 0;
+  int innerArrayIndex = 0;
+
+  for (int i = 0; i < rules.length(); i++) {
+    char currentChar = rules[i];
+
+    if (currentChar == ' ') {
+      ruleArrayIndex++;
+      innerArrayIndex = 0;
+    } else {
+      RuleArray currentArray = ruleArrays[ruleArrayIndex];
+      bool currentValue = currentArray.array[innerArrayIndex];
+      
+      currentArray.array[innerArrayIndex] = currentValue || rules[i] == '1';
+      innerArrayIndex++;
+    }
+  }
+
+  gotRemoteRules = true;
 }
 
 // draws the game screen on the LCD, showing the rules and the wires with their colors and cut status
@@ -562,17 +640,17 @@ void printWires() {
 }
 
 // kabooms if player failed to cut a wire they should have cut, wins the game if they cut all the wires they should have cut
-void determineGameState() {
+bool determineGameState() {
   for (int i = 0; i < 3; i++) { 
     ColoredWire &wire = wires[i];
     Direction dir = static_cast<Direction>(i);
     if (shouldCutWire(wire, dir) && !wire.getIsCut()) {
-      commenceKaboom(); // if the player failed to cut a wire they should have cut, kaboom
-      return;
+      // if the player failed to cut a wire they should have cut, kaboom
+      return false;
     }
   }
 
-  winGame(); // if we get to the end of the loop and haven't kaboomed, the player wins!
+  return true; // if we get to the end of the loop and haven't kaboomed, the player wins!
 }
 
 // this function determines whether a wire should be cut based on its color and direction, using the rules defined in the arrays.
