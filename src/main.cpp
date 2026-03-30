@@ -19,6 +19,7 @@
 bool isServer = true; // whether this device is the server or client in a multiplayer game
 bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
 static bool doKaboom = false; // flag for game loss
+static bool doCheck = false; // flag to check if local wire cuts violate the rules or not
 static bool doWin = false; // flag for game win
 static bool otherPlayerChecked = false; // flag that is set to true when other player's game state is checked
 static bool otherPlayerGood = false; // flag for if other player's cuts didn't violate rules, after checking.
@@ -285,6 +286,28 @@ void loop() {
       commenceKaboom();
     } else if (doWin) {
       winGame();
+    } else if (doCheck) {
+      // check if local wires were cut correctly according to local rules
+      bool gameState = determineGameState();
+
+      // if they were, tell other player to check.
+      if (gameState) {
+        sendGameStateSignal(GameStateSignal::GOOD);
+
+        // wait until other player sends signal back.
+        while (!otherPlayerChecked) {
+          delay(10);
+        }; 
+
+        // if it was a good signal then set doWin to true as we already know we're good. otherwise it was a bad signal so we will both explode on next loop.
+        if (otherPlayerGood) {
+          doWin = true;
+        }
+      } else {
+        // kaboom if we didn't cut a wire that we were supposed to.
+        doKaboom = true;
+        sendGameStateSignal(GameStateSignal::DO_KABOOM);
+      }
     } else {
       // first check if screen was tapped to end the game, if so check if the player should win or lose depending on if they cut all the correct wires
       int timeElapsed = (millis() - startTime) / 1000; // calculate time elapsed in seconds
@@ -326,14 +349,7 @@ void loop() {
         } else if (M5.Touch.ispressed()) { 
           Point touchCoord = M5.Touch.getPressPoint();
           if (touchCoord.y < screenHeight - 50) {
-            bool gameState = determineGameState();
-
-            if (gameState) {
-              doWin = true;
-            } else {
-              doKaboom = true;
-              sendGameStateSignal(GameStateSignal::DO_KABOOM);
-            }
+            doCheck = true;
           }
         }
       } else {
@@ -584,11 +600,13 @@ void updateGameState(uint8_t gameState) {
   GameStateSignal gameStateAsEnumVal = static_cast<GameStateSignal>(gameState);
   switch (gameStateAsEnumVal) {
     case GameStateSignal::DO_KABOOM: // loss
+      otherPlayerChecked = true;
       doKaboom = true;
       break;
     case GameStateSignal::GOOD:
-      break;
-    case GameStateSignal::CHECK_WIRES:
+      doCheck = true;
+      otherPlayerChecked = true;
+      otherPlayerGood = true;
       break;
   }
 }
