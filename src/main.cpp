@@ -49,7 +49,7 @@ int screenHeight;
 
 /////// game vars ////////
 
-int timeLimitSeconds = 15; // time limit for the game in seconds
+int timeLimitSeconds = 30; // time limit for the game in seconds
 int timeLeft;
 double startTime;
 
