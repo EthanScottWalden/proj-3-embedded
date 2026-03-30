@@ -15,7 +15,7 @@
 // TODO 2: if a player cuts wrong wire, lose game for both players
 // TODO 3: if a player ends game, check wires across both devices and win or lose both players depending on if each wire was cut.
 
-bool isServer = true; // whether this device is the server or client in a multiplayer game
+bool isServer = false; // whether this device is the server or client in a multiplayer game
 bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
 static bool doKaboom = false; // flag for game loss
 static bool doWin = false; // flag for game win
@@ -246,6 +246,12 @@ void setup() {
     delay(50);
   };
 
+  if (isServer) {
+    delay(500);
+  } else {
+    delay(1000);
+  }
+
   // when both devices are connected, they exchange the random rules they generated. 
   // Only the locally generated rules are visible on each m5, but all rules are active across both devices.
   sendRules(rulesAsBits);
@@ -422,9 +428,13 @@ bool connectToServer()
     // Check if server's characteristics can notify client of changes and register to listen if so
     if (rulesRemoteCharacteristic->canNotify())
         rulesRemoteCharacteristic->registerForNotify(rulesNotifyCallback);
+    else
+      Serial.println("Rules characteristic can't notify.");
 
     if (gameStateRemoteCharacteristic->canNotify())
-        rulesRemoteCharacteristic->registerForNotify(gameStateNotifyCallback);
+        gameStateRemoteCharacteristic->registerForNotify(gameStateNotifyCallback);
+    else
+      Serial.println("Gamestate characteristic can't notify.");
 
     deviceConnected = true;
     return deviceConnected;
