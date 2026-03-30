@@ -3,6 +3,7 @@
 #include "ColoredWire.h"
 #include "GameColor.h"
 #include "Direction.h"
+#include "GameStateSignal.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
@@ -15,10 +16,12 @@
 // TODO 2: if a player cuts wrong wire, lose game for both players
 // TODO 3: if a player ends game, check wires across both devices and win or lose both players depending on if each wire was cut.
 
-bool isServer = false; // whether this device is the server or client in a multiplayer game
+bool isServer = true; // whether this device is the server or client in a multiplayer game
 bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
 static bool doKaboom = false; // flag for game loss
 static bool doWin = false; // flag for game win
+static bool otherPlayerChecked = false; // flag that is set to true when other player's game state is checked
+static bool otherPlayerGood = false; // flag for if other player's cuts didn't violate rules, after checking.
 static bool gameOver = false; // flag to indicate whether the game is running
 
 // client/server vars
@@ -109,6 +112,7 @@ void generateRules(int rulesToGenerate);
 String generateRuleAsString(int index, int ruleType);
 std::string generateRulesAsBits();
 void sendRules(std::string rules);
+void sendGameStateSignal(GameStateSignal sig);
 void generateWires();
 void printWires();
 void drawGameScreen();
@@ -121,7 +125,7 @@ bool shouldCutWire(const ColoredWire& wire, Direction dir);
 void broadcastBleServer();
 bool connectToServer();
 void updateRemoteRules(std::string rules);
-void updateGameState(std::string gameState);
+void updateGameState(uint8_t gameState);
 
 // BLE Server Callback Methods
 class MyServerCallbacks : public BLEServerCallbacks {
@@ -146,8 +150,8 @@ class MyRulesCallbacks : public BLECharacteristicCallbacks {
 
 class MyGameStateCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *pCharacteristic) {
-    std::string gameState = pCharacteristic->getValue();
-    // updateGameState(gameState);
+    uint8_t* gameState = pCharacteristic->getData();
+    updateGameState(*gameState);
   }
 };
 
@@ -202,8 +206,7 @@ static void rulesNotifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristi
 
 static void gameStateNotifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic,uint8_t *pData, size_t length, bool isNotify)
 {
-  std::string gameState((char*)pData, length);
-  // updateGameState(gameState);
+  updateGameState(*pData);
 }
 
 void setup() {
@@ -315,6 +318,7 @@ void loop() {
               drawGameScreen();
             } else { // game over if you cut the wrong wire
               doKaboom = true;
+              sendGameStateSignal(GameStateSignal::DO_KABOOM);
             }
           }
           // if the user taps the screen and didn't tap a button, check if they win or lose based on whether they cut the correct wires
@@ -328,6 +332,7 @@ void loop() {
               doWin = true;
             } else {
               doKaboom = true;
+              sendGameStateSignal(GameStateSignal::DO_KABOOM);
             }
           }
         }
@@ -495,6 +500,19 @@ void sendRules(std::string rules) {
   }
 }
 
+void sendGameStateSignal(GameStateSignal sig) {
+  uint8_t sigInt = static_cast<uint8_t>(sig);
+
+  if (isServer) {
+    // server writes and notifies client
+    gameStateCharacteristic->setValue(&sigInt, 1);
+    gameStateCharacteristic->notify();
+  } else {
+    // client writes and server is automatically notified
+    gameStateRemoteCharacteristic->writeValue(&sigInt, 1);
+  }
+}
+
 // generates a string representation of a rule 
 String generateRuleAsString(int index, int ruleType) {
   // defining these arrays within the function to avoid polluting the global namespace, we don't need them anywhere else.
@@ -559,6 +577,20 @@ void updateRemoteRules(std::string rules) {
   }
 
   gotRemoteRules = true;
+}
+
+// called within callback methods when one core tells the other to take game-state related action.
+void updateGameState(uint8_t gameState) {
+  GameStateSignal gameStateAsEnumVal = static_cast<GameStateSignal>(gameState);
+  switch (gameStateAsEnumVal) {
+    case GameStateSignal::DO_KABOOM: // loss
+      doKaboom = true;
+      break;
+    case GameStateSignal::GOOD:
+      break;
+    case GameStateSignal::CHECK_WIRES:
+      break;
+  }
 }
 
 // draws the game screen on the LCD, showing the rules and the wires with their colors and cut status
