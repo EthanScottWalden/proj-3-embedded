@@ -108,6 +108,7 @@ int numRuleArrays = sizeof(ruleArrays) / sizeof(ruleArrays[0]);
 void generateRules(int rulesToGenerate);
 String generateRuleAsString(int index, int ruleType);
 std::string generateRulesAsBits();
+void sendRules(std::string rules);
 void generateWires();
 void printWires();
 void drawGameScreen();
@@ -212,54 +213,54 @@ void setup() {
   screenWidth = M5.Lcd.width();
   screenHeight = M5.Lcd.height();
 
-  // if (isServer) {
-  //   BLEDevice::init(BROADCAST_NAME.c_str());
-  //   broadcastBleServer();
-  // } else {
-  //   BLEDevice::init("");
-  //   BLEScan *pBLEScan = BLEDevice::getScan();
-  //   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-  //   pBLEScan->setInterval(1349);
-  //   pBLEScan->setWindow(449);
-  //   pBLEScan->setActiveScan(true);
-  //   pBLEScan->start(5, false);
+  if (isServer) {
+    BLEDevice::init(BROADCAST_NAME.c_str());
+    broadcastBleServer();
+  } else {
+    BLEDevice::init("");
+    BLEScan *pBLEScan = BLEDevice::getScan();
+    pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+    pBLEScan->setInterval(1349);
+    pBLEScan->setWindow(449);
+    pBLEScan->setActiveScan(true);
+    pBLEScan->start(5, false);
 
-  //   if (doConnect)
-  //   {
-  //       if (connectToServer())
-  //           Serial.println("We are now connected to the BLE Server.");
-  //       else
-  //           Serial.println("We have failed to connect to the server; there is nothin more we will do.");
-  //       doConnect = false;
-  //   }
-  // }
+    if (doConnect)
+    {
+        if (connectToServer())
+            Serial.println("We are now connected to the BLE Server.");
+        else
+            Serial.println("We have failed to connect to the server; there is nothin more we will do.");
+        doConnect = false;
+    }
+  }
 
-  // while (!deviceConnected) {
-  //   delay(50);
-  // };
-
-  // generate random rules for the game
+  // generate random rules for the game. these rules are locally displayed on the m5.
   generateRules(LOCAL_RULES);
 
   std::string rulesAsBits = generateRulesAsBits();
-  Serial.println(rulesAsBits.c_str());
+  Serial.printf("Local rules as bits: %s\n", rulesAsBits.c_str());
 
-  // std::string testStr = "100 000 000 111";
-  // Serial.printf("Testing rule copy with: %s\n", testStr.c_str());
-  // updateRemoteRules(testStr);
+  // wait for another device to connect
+  while (!deviceConnected) {
+    delay(50);
+  };
 
-  // rulesAsBits = generateRulesAsBits();
-  // Serial.println(rulesAsBits.c_str());
+  // when both devices are connected, they exchange the random rules they generated. 
+  // Only the locally generated rules are visible on each m5, but all rules are active across both devices.
+  sendRules(rulesAsBits);
+
+  // wait for both devices to acknowledge processing of other device's rules.
+  while (!gotRemoteRules) {
+    delay(50);
+  }
+
+  // debug
+  rulesAsBits = generateRulesAsBits();
+  Serial.printf("Global rules as bits: %s\n", rulesAsBits.c_str());
 
   // generate randomly colored wires for the game
   generateWires();
-
-  // print the rules to the console for testing purposes
-  // for (int i = 0; i < RULES; i++) {
-  //   Serial.printf("%d. %s\n", i + 1, rulesAsString[i].c_str());
-  // }
-
-  // printWires();
 
   timeLeft = timeLimitSeconds;
   drawGameScreen();
@@ -471,6 +472,17 @@ std::string generateRulesAsBits() {
   }
 
   return res;
+}
+
+void sendRules(std::string rules) {
+  if (isServer) {
+    // server writes and notifies client
+    rulesCharacteristic->setValue(rules);
+    rulesCharacteristic->notify();
+  } else {
+    // client writes and server is automatically notified
+    rulesRemoteCharacteristic->writeValue(rules);
+  }
 }
 
 // generates a string representation of a rule 
