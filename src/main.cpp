@@ -598,14 +598,14 @@ void updateRemoteRules(std::string rules) {
 // called within callback methods when one core tells the other to take game-state related action.
 void updateGameState(uint8_t gameState) {
   GameStateSignal gameStateAsEnumVal = static_cast<GameStateSignal>(gameState);
+  otherPlayerChecked = true;
+
   switch (gameStateAsEnumVal) {
-    case GameStateSignal::DO_KABOOM: // loss
-      otherPlayerChecked = true;
+    case GameStateSignal::DO_KABOOM: // other player lost, so both players lose.
       doKaboom = true;
       break;
-    case GameStateSignal::GOOD:
-      doCheck = true;
-      otherPlayerChecked = true;
+    case GameStateSignal::GOOD: // other player checked their wire cuts and didn't violate the rules
+      doCheck = true; // prompting local check if it hasn't happened yet.
       otherPlayerGood = true;
       break;
   }
