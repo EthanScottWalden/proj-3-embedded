@@ -12,10 +12,6 @@
 #define RULES_UUID "8af8cd3e-18b1-474d-9393-2b30dca181d1"
 #define GAME_STATE_UUID "5ebdfc4f-92b2-4c43-8067-347eff415317"
 
-// TODO 1: server and client should send each other rules before starting game.
-// TODO 2: if a player cuts wrong wire, lose game for both players
-// TODO 3: if a player ends game, check wires across both devices and win or lose both players depending on if each wire was cut.
-
 bool isServer = true; // whether this device is the server or client in a multiplayer game
 bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
 static bool doKaboom = false; // flag for game loss
