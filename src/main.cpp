@@ -21,7 +21,7 @@ uint32_t buttonMask = (1UL << BUTTON_START) | (1UL << BUTTON_B) | (1UL << BUTTON
 
 String userId;
 
-bool isServer = true; // whether this device is the server or client in a multiplayer game
+bool isServer = false; // whether this device is the server or client in a multiplayer game
 bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
 static bool doKaboom = false; // flag for game loss
 static bool doCheck = false; // flag to check if local wire cuts violate the rules or not
@@ -57,7 +57,6 @@ int screenWidth;
 int screenHeight;
 
 /////// game vars ////////
-
 int timeLimitSeconds = 30; // time limit for the game in seconds
 int timeLeft;
 double startTime;
@@ -236,12 +235,12 @@ void setup() {
   M5.Lcd.printf("ID: %s\n\n", userId.c_str());
 
   if (isServer) {
-    M5.Lcd.println("Waiting on CLIENT...");
+    M5.Lcd.println("Waiting on CLIENT...\n");
     
     BLEDevice::init(BROADCAST_NAME.c_str());
     broadcastBleServer();
   } else {
-    M5.Lcd.println("Waiting on SERVER...");
+    M5.Lcd.println("Waiting on SERVER...\n");
     BLEDevice::init("");
     BLEScan *pBLEScan = BLEDevice::getScan();
     pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
@@ -252,14 +251,15 @@ void setup() {
 
     if (doConnect)
     {
-        if (connectToServer())
-            Serial.println("We are now connected to the BLE Server.");
-        else
-            Serial.println("We have failed to connect to the server; there is nothin more we will do.");
+        if (connectToServer()) {
+          Serial.println("We are now connected to the BLE Server.");
+        } else {
+            M5.Lcd.println("Failed to connect to server... please restart.");
             while (1);
+        }
         doConnect = false;
     } else {
-      Serial.println("Failed to find the server player... please restart.");
+      M5.Lcd.println("Failed to find the server player... please restart.");
       while (1);
     }
   }
