@@ -272,13 +272,14 @@ void setup() {
 
   // wait for another device to connect
   while (!deviceConnected) {
+    Serial.println("Waiting for connection...");
     delay(50);
   };
 
   if (isServer) {
-    delay(500);
-  } else {
     delay(1000);
+  } else {
+    delay(3000);
   }
 
   // when both devices are connected, they exchange the random rules they generated. 
