@@ -19,7 +19,7 @@
 #define BUTTON_START    16
 uint32_t buttonMask = (1UL << BUTTON_START) | (1UL << BUTTON_B) | (1UL << BUTTON_SELECT);
 
-String userId = "default";
+String userId;
 
 bool isServer = true; // whether this device is the server or client in a multiplayer game
 bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
@@ -378,7 +378,7 @@ String inputUserId() {
 
   if (!ss.begin(0x50)) {
       Serial.println("Seesaw not found");
-      while (1); // infinite loop
+      return "noseenorsaw";
   }
 
   // settings for seesaw
@@ -444,7 +444,7 @@ String inputUserId() {
       userIdArr[userIdArrPos] = '\0'; // just for safety. not necessary if our logic is right
       doDrawKeyboardScreen = true;
     }
-    
+
     if (rightKeyExists && analogXRead > 700) { // right input
       selectedKeyCol++;
       doDrawKeyboardScreen = true;
