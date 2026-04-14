@@ -226,11 +226,22 @@ void setup() {
   screenHeight = M5.Lcd.height();
 
   userId = inputUserId();
+  Serial.printf("User id: %s\n", userId.c_str());
+
+  M5.Lcd.fillScreen(TFT_BLACK);
+  M5.Lcd.setCursor(0,0);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.setTextColor(TFT_WHITE);
+
+  M5.Lcd.printf("ID: %s\n\n", userId.c_str());
 
   if (isServer) {
+    M5.Lcd.println("Waiting on CLIENT...");
+    
     BLEDevice::init(BROADCAST_NAME.c_str());
     broadcastBleServer();
   } else {
+    M5.Lcd.println("Waiting on SERVER...");
     BLEDevice::init("");
     BLEScan *pBLEScan = BLEDevice::getScan();
     pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
@@ -245,7 +256,11 @@ void setup() {
             Serial.println("We are now connected to the BLE Server.");
         else
             Serial.println("We have failed to connect to the server; there is nothin more we will do.");
+            while (1);
         doConnect = false;
+    } else {
+      Serial.println("Failed to find the server player... please restart.");
+      while (1);
     }
   }
 
