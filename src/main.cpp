@@ -4,13 +4,22 @@
 #include "GameColor.h"
 #include "Direction.h"
 #include "GameStateSignal.h"
+#include "Key.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
+#include "Adafruit_seesaw.h"
 
 #define SERVICE_UUID "53b3448b-4e1e-4d97-bd07-9d11deca4188"
 #define RULES_UUID "8af8cd3e-18b1-474d-9393-2b30dca181d1"
 #define GAME_STATE_UUID "5ebdfc4f-92b2-4c43-8067-347eff415317"
+
+#define BUTTON_B         1
+#define BUTTON_SELECT    0
+#define BUTTON_START    16
+uint32_t buttonMask = (1UL << BUTTON_START) | (1UL << BUTTON_B) | (1UL << BUTTON_SELECT);
+
+String userId = "default";
 
 bool isServer = true; // whether this device is the server or client in a multiplayer game
 bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
@@ -105,6 +114,9 @@ static RuleArray ruleArrays[] = {
 int numRuleArrays = sizeof(ruleArrays) / sizeof(ruleArrays[0]);
 
 // func declarations
+String inputUserId();
+bool isPressed(uint32_t buttonRead, uint8_t button);
+void drawKeyboardScreen(Key (&keyboard)[3][10], int selectedKeyRow, int selectedKeyCol, int keyW, int keyH, char userIdArr[]);
 void generateRules(int rulesToGenerate);
 String generateRuleAsString(int index, int ruleType);
 std::string generateRulesAsBits();
@@ -212,6 +224,8 @@ void setup() {
 
   screenWidth = M5.Lcd.width();
   screenHeight = M5.Lcd.height();
+
+  userId = inputUserId();
 
   if (isServer) {
     BLEDevice::init(BROADCAST_NAME.c_str());
@@ -357,6 +371,159 @@ void loop() {
   delay(50);
 }
 
+// creates a keyboard on the m5core2 screen, which the user can operate with seesaw to input their userId.
+String inputUserId() {
+  // init seesaw
+  Adafruit_seesaw ss;
+
+  if (!ss.begin(0x50)) {
+      Serial.println("Seesaw not found");
+      while (1); // infinite loop
+  }
+
+  // settings for seesaw
+  ss.pinModeBulk(buttonMask, INPUT_PULLUP); 
+  ss.setGPIOInterrupts(buttonMask, true);
+
+  // keyboard spec
+  int keyW = 30;
+  int keyH = 30;
+  int keyStartX = 10;
+  int keyStartY = screenHeight / 2;
+
+  char layout[3][10] = {
+    {'q','w','e','r','t','y','u','i','o','p'},
+    {'a','s','d','f','g','h','j','k','l','\0'},
+    {'z','x','c','v','b','n','m','\0','\0','\0'}
+  };
+
+  Key keyboard[3][10];
+  int selectedKeyRow = 0;
+  int selectedKeyCol = 0;
+
+  // initializes keyboard array
+  for (int row = 0; row < 3; row++) {
+    for (int col = 0; col < 10; col++) {
+      // if (layout[row][col] != '\0') {
+        keyboard[row][col].ch = layout[row][col];
+        keyboard[row][col].x = keyStartX + col * keyW + row * 5; // indent per row
+        keyboard[row][col].y = keyStartY + row * (keyH + 5); // spacing between rows
+      // }
+    }
+  }
+
+  // default values
+  uint32_t buttonRead = buttonMask;
+  bool bPressed = false;
+  bool startPressed = false;
+  bool selectPressed = false;
+  bool leftKeyExists = false;
+  bool rightKeyExists = false;
+  bool aboveKeyExists = false;
+  bool belowKeyExists = false;
+  int analogXRead = 1023 / 2;
+  int analogYRead = 1023 / 2;
+
+  char userIdArr[16] = {0}; // full of '\0' initially. userIdArr[15] will always be '\0'
+  int userIdArrPos = 0;
+
+  bool doDrawKeyboardScreen = true;
+
+  do {
+    M5.update();
+
+    // backspace
+    if (bPressed && userIdArrPos > 0) {
+      userIdArr[--userIdArrPos] = '\0';
+      doDrawKeyboardScreen = true;
+    }
+
+    // like pressing the key you have selected.
+    if (selectPressed && userIdArrPos < 15) {
+      userIdArr[userIdArrPos++] = keyboard[selectedKeyRow][selectedKeyCol].ch;
+      userIdArr[userIdArrPos] = '\0'; // just for safety. not necessary if our logic is right
+      doDrawKeyboardScreen = true;
+    }
+    
+    if (rightKeyExists && analogXRead > 700) { // right input
+      selectedKeyCol++;
+      doDrawKeyboardScreen = true;
+    } else if (leftKeyExists && analogXRead < 300) { // left input
+      selectedKeyCol--;
+      doDrawKeyboardScreen = true;
+    } else if (aboveKeyExists && analogYRead > 700) { // up input
+      selectedKeyRow--;
+      doDrawKeyboardScreen = true;
+    } else if (belowKeyExists && analogYRead < 300) { // down input
+      selectedKeyRow++;
+      doDrawKeyboardScreen = true;
+    }
+
+    if (doDrawKeyboardScreen) {
+      drawKeyboardScreen(keyboard, selectedKeyRow, selectedKeyCol, keyW, keyH, userIdArr);
+    }
+
+    buttonRead = ss.digitalReadBulk(buttonMask);
+    bPressed = isPressed(buttonRead, BUTTON_B);
+    startPressed = isPressed(buttonRead, BUTTON_START);
+    selectPressed = isPressed(buttonRead, BUTTON_SELECT);
+    analogXRead = 1023 - ss.analogRead(14);
+    analogYRead = 1023 - ss.analogRead(15);
+    
+    char rightKey = selectedKeyCol < 9 ? keyboard[selectedKeyRow][selectedKeyCol + 1].ch : '\0';
+    rightKeyExists = rightKey != '\0';
+
+    char leftKey = selectedKeyCol > 0 ? keyboard[selectedKeyRow][selectedKeyCol - 1].ch : '\0';
+    leftKeyExists = leftKey != '\0';
+
+    char aboveKey = selectedKeyRow > 0 ? keyboard[selectedKeyRow - 1][selectedKeyCol].ch : '\0';
+    aboveKeyExists = aboveKey != '\0';
+
+    char belowKey = selectedKeyRow < 2 ? keyboard[selectedKeyRow + 1][selectedKeyCol].ch : '\0';
+    belowKeyExists = belowKey != '\0';
+
+    doDrawKeyboardScreen = false;
+
+    delay(125);
+  } while (!startPressed);
+
+  return String(userIdArr);
+}
+
+// returns true if the button is pressed, false otherwise.
+bool isPressed(uint32_t buttonRead, uint8_t button) {
+    return (buttonRead & (1UL << button)) == 0;
+}
+
+void drawKeyboardScreen(Key (&keyboard)[3][10], int selectedKeyRow, int selectedKeyCol, int keyW, int keyH, char userIdArr[]) {
+  M5.Lcd.setTextSize(3);
+  M5.Lcd.fillScreen(TFT_BLACK);
+  M5.Lcd.setTextColor(TFT_WHITE);
+
+  // Prompt to enter name
+  M5.Lcd.setCursor(10,10);
+  M5.Lcd.println("Enter user id:");
+
+  M5.Lcd.setCursor(M5.Lcd.getCursorX() + 10, M5.Lcd.getCursorY());
+  M5.Lcd.printf(userIdArr);
+  // draw each valid key as a character
+
+  for (int row = 0; row < 3; row++) {
+    for (int col = 0; col < 10; col++) {
+      if (keyboard[row][col].ch == '\0') {
+        continue;
+      }
+
+      if (row == selectedKeyRow && col == selectedKeyCol) {
+        M5.Lcd.drawRect(keyboard[row][col].x, keyboard[row][col].y, keyW, keyH, TFT_WHITE);
+      }
+
+      M5.Lcd.setCursor(keyboard[row][col].x, keyboard[row][col].y);
+      M5.Lcd.print(keyboard[row][col].ch);
+    }
+  }
+}
+
 // creates and broadcasts BLE server
 void broadcastBleServer() {
   bleServer = BLEDevice::createServer();
@@ -481,7 +648,7 @@ void generateRules(int rulesToGenerate) {
 // iterates over ruleArrays and generates a string representing the truth values in each array.
 // each array is represented by a substring of binary numbers within the larger returned string, 
 // where, for some j, the jth character in the set = 1 means array[j] is true, and = 0 means false.
-// the substrings of binary are seperated by spaces, such that, for some i, the ith substirng of binary represents truth values in the ith array 
+// the substrings of binary are seperated by spaces, such that, for some i, the ith substirng of binary represents truth values in the ith array
 std::string generateRulesAsBits() {
   std::string res = "";
 
