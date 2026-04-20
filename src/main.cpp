@@ -22,7 +22,7 @@
 #define BUTTON_SELECT    0
 #define BUTTON_START    16
 
-static String GCF_UPDATE = "https://wl-update-1070542919556.us-west2.run.app";
+static String GCF_UPDATE = "https://wl-update-1070542919556.us-west2.run.app/";
 
 String wifiNetworkName = "Teddys House";
 String wifiPassword = "Teddybear@linwood";
@@ -148,6 +148,7 @@ void updateRemoteRules(std::string rules);
 void updateGameState(uint8_t gameState);
 void BLEDisconnect();
 void disconnectAndUpdateWinLossRatio(bool win);
+void connectWifi();
 
 // BLE Server Callback Methods
 class MyServerCallbacks : public BLEServerCallbacks {
@@ -517,7 +518,14 @@ String inputUserId() {
     delay(125);
   } while (!startPressed);
 
-  return String(userIdArr);
+  String userIdStr(userIdArr);
+  
+  // for the mysterious ones (prevents empty userId which probably doesn't work well with GCF)
+  if (userIdStr.length() == 0) {
+    userIdStr = "sirnobody";
+  }
+
+  return userIdStr;
 }
 
 // returns true if the button is pressed, false otherwise.
@@ -909,7 +917,10 @@ std::vector<int> updateWinLossRatio(bool win) {
   String fullUrl = GCF_UPDATE + "?userId=" + userId + "&wins=" + (win ? "1" : "0") + "&losses=" + (win ? "0" : "1");
 
   HTTPClient http;
-  http.begin(fullUrl.c_str());
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  http.begin(client, fullUrl.c_str());
   int httpResponseCode = http.GET();
 
   if (httpResponseCode == 200) {
@@ -931,36 +942,62 @@ std::vector<int> updateWinLossRatio(bool win) {
 // draws the win/loss ratio for userId on the LCD. wins and losses should be the updated ratio from GCF.
 void drawWinLossRatio(int wins, int losses) {
   M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setTextSize(3);
+  M5.Lcd.setTextSize(2);
   M5.Lcd.setTextColor(WHITE);
 
   M5.Lcd.setCursor(10, 10);
-  M5.Lcd.printf("Record for user ID: %s\n\n", userId.c_str());
+  M5.Lcd.printf("User ID: %s\n\n\n", userId.c_str());
 
+  M5.Lcd.setTextSize(3);
+  M5.Lcd.setCursor(M5.Lcd.getCursorX() + 10, M5.Lcd.getCursorY());
   if (wins == -1 || losses == -1) {
     M5.Lcd.setTextColor(RED);
     M5.Lcd.printf("Error retrieving win/loss ratio.");
     return;
   } else {
     M5.Lcd.setTextColor(GREEN);
-    M5.Lcd.printf("%d", wins);
+    M5.Lcd.printf("%d WINS", wins);
 
     M5.Lcd.setTextColor(WHITE);
     M5.Lcd.printf("/");
 
     M5.Lcd.setTextColor(RED);
-    M5.Lcd.printf("%d", losses);
+    M5.Lcd.printf("%d LOSSES\n\n", losses);
+
+    // funny messages depending on the player's overall historicalperformance
+    M5.Lcd.setTextSize(2);
+
+    int winsMinusLosses = wins - losses;
+    if (winsMinusLosses >= 5) {
+      M5.Lcd.setTextColor(GREEN);
+      M5.Lcd.printf("You're the bomb (defuser)!");
+    } else if (winsMinusLosses <= -5) {
+      M5.Lcd.setTextColor(RED);
+      M5.Lcd.printf("bro go back to preschool\n and learn your colors");
+    } else {
+      M5.Lcd.setTextColor(WHITE);
+      M5.Lcd.printf("Come again to see your \nwin/loss ratio update \nafter more games!");
+    }
   }
 }
 
 void disconnectAndUpdateWinLossRatio(bool win) {
   BLEDisconnect();
+  connectWifi();
 
-  ///////////////////////////////////////////////////////////
-  // Connect to WiFi
-  ///////////////////////////////////////////////////////////
+  std::vector<int> ratio = updateWinLossRatio(win);
+  drawWinLossRatio(ratio[0], ratio[1]);
+}
+
+void connectWifi() {
+  WiFi.disconnect(true, true);
+  delay(1000);
+
+  WiFi.mode(WIFI_STA);
+  delay(100);
+
   WiFi.begin(wifiNetworkName.c_str(), wifiPassword.c_str());
-  Serial.printf("Connecting");
+  Serial.printf("Connecting to WiFi network: %s", wifiNetworkName.c_str());
   while (WiFi.status() != WL_CONNECTED)
   {
       delay(500);
@@ -969,8 +1006,20 @@ void disconnectAndUpdateWinLossRatio(bool win) {
   Serial.print("\n\nConnected to WiFi network with IP address: ");
   Serial.println(WiFi.localIP());
 
-  std::vector<int> ratio = updateWinLossRatio(win);
-  drawWinLossRatio(ratio[0], ratio[1]);
+  // delay(1000);
+
+  // bool dnsGood = false;
+
+  // do {
+  //   Serial.println("Testing DNS connection to google.com... (if this works the gcf should work too!)");
+  //   IPAddress googleIP;
+  //   if (WiFi.hostByName("google.com", googleIP)) {
+  //     Serial.printf("DNS test successful. google.com resolved to: %s\n", googleIP.toString().c_str());
+  //     dnsGood = true;
+  //   } else {
+  //     Serial.println("DNS test failed. Unable to resolve google.com");
+  //   }
+  // } while (!dnsGood);
 }
 
 // print the wires
