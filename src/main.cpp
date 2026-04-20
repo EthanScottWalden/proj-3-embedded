@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <M5Core2.h>
+#include <WiFi.h>
 #include "ColoredWire.h"
 #include "GameColor.h"
 #include "Direction.h"
@@ -9,6 +10,9 @@
 #include <BLEServer.h>
 #include <BLE2902.h>
 #include "Adafruit_seesaw.h"
+#include <ArduinoJson.h>
+#include <HTTPClient.h>
+#include <vector>
 
 #define SERVICE_UUID "53b3448b-4e1e-4d97-bd07-9d11deca4188"
 #define RULES_UUID "8af8cd3e-18b1-474d-9393-2b30dca181d1"
@@ -17,11 +21,17 @@
 #define BUTTON_B         1
 #define BUTTON_SELECT    0
 #define BUTTON_START    16
+
+static String GCF_UPDATE = "https://wl-update-1070542919556.us-west2.run.app";
+
+String wifiNetworkName = "Teddys House";
+String wifiPassword = "Teddybear@linwood";
+
 uint32_t buttonMask = (1UL << BUTTON_START) | (1UL << BUTTON_B) | (1UL << BUTTON_SELECT);
 
 String userId;
 
-bool isServer = false; // whether this device is the server or client in a multiplayer game
+bool isServer = true; // whether this device is the server or client in a multiplayer game
 bool gotRemoteRules = false; // whether this device has received rules from the other core to copy onto itself
 static bool doKaboom = false; // flag for game loss
 static bool doCheck = false; // flag to check if local wire cuts violate the rules or not
@@ -128,12 +138,16 @@ void drawSuccessScreen();
 void winGame();
 void commenceKaboom();
 void drawKaboomScreen();
+std::vector<int> updateWinLossRatio(bool win);
+void drawWinLossRatio(int wins, int losses);
 bool determineGameState();
 bool shouldCutWire(const ColoredWire& wire, Direction dir);
 void broadcastBleServer();
 bool connectToServer();
 void updateRemoteRules(std::string rules);
 void updateGameState(uint8_t gameState);
+void BLEDisconnect();
+void disconnectAndUpdateWinLossRatio(bool win);
 
 // BLE Server Callback Methods
 class MyServerCallbacks : public BLEServerCallbacks {
@@ -272,7 +286,7 @@ void setup() {
 
   // wait for another device to connect
   while (!deviceConnected) {
-    Serial.println("Waiting for connection...");
+    // Serial.println("Waiting for connection...");
     delay(50);
   };
 
@@ -851,12 +865,14 @@ void drawGameScreen() {
 // draws game over screen and sets gameOver to true to prevent further input processing
 void commenceKaboom() {
   drawKaboomScreen();
+  disconnectAndUpdateWinLossRatio(false); // update win/loss ratio with a loss before disconnecting and deinitting BLE
   gameOver = true;
 }
 
 // draws success screen and sets gameOver to true to prevent further input processing
 void winGame() {
   drawSuccessScreen();
+  disconnectAndUpdateWinLossRatio(true); // update win/loss ratio with a win before disconnecting and deinitting BLE
   gameOver = true;
 }
 
@@ -878,6 +894,83 @@ void drawKaboomScreen() {
   M5.Lcd.setTextSize(5);
   M5.Lcd.setTextColor(BLACK);
   M5.Lcd.print("KABOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOM"); 
+}
+
+// stops advertising if server, deinits BLE for both players.
+void BLEDisconnect() {
+  if (isServer) {
+    BLEDevice::stopAdvertising();
+  }
+  BLEDevice::deinit();
+}
+
+// updates win/loss ratio on the cloud and returns the ratio as a vector of two ints, where the first int is wins and the second int is losses.
+std::vector<int> updateWinLossRatio(bool win) {
+  String fullUrl = GCF_UPDATE + "?userId=" + userId + "&wins=" + (win ? "1" : "0") + "&losses=" + (win ? "0" : "1");
+
+  HTTPClient http;
+  http.begin(fullUrl.c_str());
+  int httpResponseCode = http.GET();
+
+  if (httpResponseCode == 200) {
+    DynamicJsonDocument jsonResponse(1024);
+    deserializeJson(jsonResponse, http.getString());
+    int wins = jsonResponse["wins"];
+    int losses = jsonResponse["losses"];
+    
+    Serial.printf("Updated win/loss ratio. Wins: %d, Losses: %d\n", wins, losses);
+    http.end();
+    return {wins, losses};
+  } else {
+    Serial.printf("Error updating win/loss ratio: %d\n", httpResponseCode);
+    http.end();
+    return {-1, -1}; // return -1, -1 to indicate an error
+  }
+}
+
+// draws the win/loss ratio for userId on the LCD. wins and losses should be the updated ratio from GCF.
+void drawWinLossRatio(int wins, int losses) {
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextSize(3);
+  M5.Lcd.setTextColor(WHITE);
+
+  M5.Lcd.setCursor(10, 10);
+  M5.Lcd.printf("Record for user ID: %s\n\n", userId.c_str());
+
+  if (wins == -1 || losses == -1) {
+    M5.Lcd.setTextColor(RED);
+    M5.Lcd.printf("Error retrieving win/loss ratio.");
+    return;
+  } else {
+    M5.Lcd.setTextColor(GREEN);
+    M5.Lcd.printf("%d", wins);
+
+    M5.Lcd.setTextColor(WHITE);
+    M5.Lcd.printf("/");
+
+    M5.Lcd.setTextColor(RED);
+    M5.Lcd.printf("%d", losses);
+  }
+}
+
+void disconnectAndUpdateWinLossRatio(bool win) {
+  BLEDisconnect();
+
+  ///////////////////////////////////////////////////////////
+  // Connect to WiFi
+  ///////////////////////////////////////////////////////////
+  WiFi.begin(wifiNetworkName.c_str(), wifiPassword.c_str());
+  Serial.printf("Connecting");
+  while (WiFi.status() != WL_CONNECTED)
+  {
+      delay(500);
+      Serial.print(".");
+  }
+  Serial.print("\n\nConnected to WiFi network with IP address: ");
+  Serial.println(WiFi.localIP());
+
+  std::vector<int> ratio = updateWinLossRatio(win);
+  drawWinLossRatio(ratio[0], ratio[1]);
 }
 
 // print the wires
