@@ -3,7 +3,7 @@
 
 enum GameStateSignal {
     DO_KABOOM = 0,
-    GOOD = 1
+    GOOD_CUT = 1
 };
 
-#endif // GAME_COLOR_H
+#endif // GAME_STATE_SIGNAL_H
